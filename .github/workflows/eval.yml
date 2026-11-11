@@ -118,3 +118,15 @@ jobs:
         run: |
           echo "::error::Eval gate failed. See the PR comment or job summary for details."
           exit 1
+
+  # Checks the Dockerfile still builds and the tests pass inside the image.
+  # No API key needed: the unit tests make no API calls.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t nl2sql-evals .
+      - name: Run tests in image
+        run: docker run --rm nl2sql-evals
