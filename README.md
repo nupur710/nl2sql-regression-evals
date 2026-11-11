@@ -4,6 +4,9 @@ A natural-language → SQL agent with an automated eval suite. The focus is
 the **evals**: execution-based grading is the source of truth, and the test cases
 are designed to catch specific, realistic mistakes.
 
+**Showcase:** [a "prompt cleanup" PR that the CI gate blocked at −10.7 points](docs/CAUGHT_REGRESSION.md),
+even though its unit tests passed and it cut input tokens by 65%.
+
 ## Setup
 ```bash
 python -m venv .venv
