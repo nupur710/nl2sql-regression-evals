@@ -71,7 +71,7 @@ def test_generate_sql_sends_expected_request():
     assert call["model"] == "claude-opus-5-5"
     assert call["output_config"] == {"effort": "low"}
     assert call["messages"] == [{"role": "user", "content": "Q?"}]
-    assert "CREATE TABLE users" in call["system"]
+    assert "users(" in call["system"]  # compact schema in prompt v2
     assert call["fallbacks"] == "default"
 
 
