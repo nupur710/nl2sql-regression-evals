@@ -1,0 +1,120 @@
+# Runs the SQL agent evals on every pull request and blocks the merge if the
+# pass rate drops more than MAX_DROP compared with the target branch.
+#
+# Both sides are evaluated in the same job (same day, same model, same API), and
+# each side is run REPEATS times, because model output varies from run to run.
+name: eval
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write   # to post the summary comment
+
+concurrency:
+  group: eval-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      REPEATS: 3
+      MAX_DROP: "0.04"   # 4 points = 2 of 50 cases
+
+    steps:
+      - name: Check out PR (head)
+        uses: actions/checkout@v4
+        with:
+          path: head
+
+      - name: Check out target branch (base)
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: head/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r head/requirements.txt
+
+      - name: Unit tests (graders, golden set, runner)
+        working-directory: head
+        run: python -m pytest -q
+
+      - name: Check API key
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not set (PRs from forks don't get secrets)."
+            exit 1
+          fi
+
+      - name: Eval base
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p out
+          if [ ! -f base/evals/run_eval.py ]; then
+            echo "Target branch has no eval runner yet; skipping baseline."
+            exit 0
+          fi
+          cd base
+          for i in $(seq 1 "$REPEATS"); do
+            python -m evals.run_eval --out "../out/base_$i.json"
+          done
+
+      - name: Eval head
+        working-directory: head
+        run: |
+          mkdir -p ../out
+          for i in $(seq 1 "$REPEATS"); do
+            python -m evals.run_eval --out "../out/head_$i.json"
+          done
+
+      - name: Compare
+        id: compare
+        continue-on-error: true   # post the report first, fail at the end
+        working-directory: head
+        run: |
+          python -m evals.compare \
+            --base $(ls ../out/base_*.json 2>/dev/null) \
+            --head ../out/head_*.json \
+            --max-drop "$MAX_DROP" \
+            --out ../out/report.md
+
+      - name: Write job summary
+        if: always()
+        run: '[ -f out/report.md ] && cat out/report.md >> "$GITHUB_STEP_SUMMARY" || true'
+
+      - name: Comment on PR
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          [ -f out/report.md ] || exit 0
+          # Update the bot's previous comment instead of adding a new one each push.
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file out/report.md --edit-last \
+            || gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file out/report.md
+
+      - name: Upload run files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: out/
+
+      - name: Fail if eval regressed or errored
+        if: steps.compare.outcome == 'failure'
+        run: |
+          echo "::error::Eval gate failed. See the PR comment or job summary for details."
+          exit 1
