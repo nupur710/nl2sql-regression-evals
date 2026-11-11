@@ -121,17 +121,17 @@ def print_summary(summary):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Run the SQL agent over the golden set.")
-    parser.add_argument("--prompt", default="v1", help="prompt version in agent/prompts/")
+    parser.add_argument("--prompt", help="prompt version in agent/prompts/ (default: the agent's DEFAULT_PROMPT)")
     parser.add_argument("--limit", type=int, help="only run the first N cases")
     parser.add_argument("--out", type=Path, help="results JSON path (default: results/<time>_<prompt>.json)")
     parser.add_argument("--workers", type=int, default=5, help="parallel API calls (default 5)")
     args = parser.parse_args(argv)
 
-    from agent.sql_agent import SQLAgent  # imported here so tests don't need the SDK client
+    from agent.sql_agent import DEFAULT_PROMPT, SQLAgent  # here so tests don't need the SDK client
 
     cases = load_golden()[: args.limit]
     db_path = build_db(DEFAULT_DB_PATH)  # fresh, identical db every run
-    agent = SQLAgent(prompt_version=args.prompt)
+    agent = SQLAgent(prompt_version=args.prompt or DEFAULT_PROMPT)
 
     started = datetime.now(timezone.utc)
     print(f"Running {len(cases)} cases | prompt={agent.prompt_version} "

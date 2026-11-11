@@ -21,6 +21,7 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "data" / "schema.sql"
 
 DEFAULT_MODEL = "claude-haiku-5-5"  # cheap enough to run on every PR
+DEFAULT_PROMPT = "v2"  # compact prompt: ~65% fewer input tokens than v1
 DEFAULT_EFFORT = "medium"
 MAX_TOKENS = 16000
 
@@ -62,7 +63,7 @@ def extract_sql(text):
 
 
 class SQLAgent:
-    def __init__(self, prompt_version="v1", model=None, effort=None, client=None):
+    def __init__(self, prompt_version=DEFAULT_PROMPT, model=None, effort=None, client=None):
         self.prompt_version = prompt_version
         self.model = model or os.environ.get("SQL_AGENT_MODEL", DEFAULT_MODEL)
         self.effort = effort or os.environ.get("SQL_AGENT_EFFORT", DEFAULT_EFFORT)
