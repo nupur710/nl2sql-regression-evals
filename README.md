@@ -62,6 +62,51 @@ PRs from forks don't receive secrets, so the eval can't run on them; the job fai
 clear message. Don't switch to `pull_request_target` to work around this: it would run
 untrusted PR code with your API key.
 
+## LLM judge (secondary grader)
+`evals/graders/llm_judge.py` asks a model whether a query answers the question. It sees
+what a human reviewer would: the schema, the question and the SQL. It does not see the
+gold query or the data. The verdict is returned through structured output (guaranteed JSON).
+Default judge: `claude-sonnet-5-5` (set `JUDGE_MODEL` / `JUDGE_EFFORT` to change), a
+different model from the agent so it isn't grading its own style.
+
+```bash
+python -m evals.judge_agreement                       # 50 gold + 50 trap queries
+python -m evals.judge_agreement --no-traps --results results/x.json   # the agent's real SQL
+```
+`evals/judge_agreement.py` labels every item with execution grading, runs the judge, and
+reports accuracy, **Cohen's kappa** (agreement corrected for chance), how often the judge is
+fooled (passes wrong SQL) or too strict (fails right SQL), and lists every disagreement with
+the judge's reasoning. Reports are in `reports/`.
+
+**Findings:**
+| Item set | Judge | Accuracy | Kappa | Fooled | Too strict |
+|---|---|---|---|---|---|
+| 50 gold + 50 trap queries | Sonnet 5.5 | 96% | 0.92 | 4 / 50 | 0 / 50 |
+| 50 gold + 50 trap queries | Haiku 5.5 | 93% | 0.86 | 5 / 50 | 2 / 50 |
+| Agent's real SQL (one run) | Sonnet 5.5 | 92% | **0.00** | **4 / 4** | 0 / 46 |
+
+- **The judge has the same blind spots as the agent.** It missed the ties (q046, q047, q050)
+  and the empty months (q040): errors that depend on the data, which the judge can't see.
+  It even wrote "ties are unspecified in the question" and passed the query anyway.
+- **So on the agent's real output, the judge caught none of the 4 real failures.** An
+  LLM-judged eval would have reported 100% where execution grading says 92%. Accuracy
+  still looks fine (92%) because most answers are right; **kappa = 0** shows the judge
+  added no information. This is why execution grading is the source of truth here.
+- Haiku was additionally fooled by `name = 'Apple'` (q031): it can't know the data
+  stores "Apple Inc.".
+- The judge did find one real weakness in the golden set: q048's gold SQL had no upper
+  date bound and was only correct because the data ends in 2026. Fixed.
+- Judge runs also vary: Haiku scored 96% and 93% on two runs of the same items.
+
+## Docker
+```bash
+docker build -t nl2sql-evals .
+docker run --rm nl2sql-evals                     # unit tests, no key needed
+docker run --rm -e ANTHROPIC_API_KEY -v "$PWD/results:/app/results" nl2sql-evals evals.run_eval
+```
+Arguments after the image name are a module run with `python -m`. CI builds the image and
+runs the tests inside it on every PR (`docker` job).
+
 ## The agent
 `agent/sql_agent.py` makes one API call per question. The system prompt is
 `agent/prompts/<version>.txt` with the schema inserted. The SQL is pulled out of the
